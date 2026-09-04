@@ -1728,6 +1728,67 @@ class CardBrowserTest : RobolectricTest() {
             assertMenusEqual(expectedMenuItems, menu)
         }
 
+    /**
+     * Regression test for `CardBrowserFragment.openNoteEditorForCurrentlySelectedRow`
+     * (`@NeedsTest("note edits are saved")`).
+     *
+     * Editing a note from the browser and saving it must persist the change to the collection.
+     */
+    @Test
+    fun `note edits made in the browser are saved`() {
+        val note = addBasicNote("Hello", "World")
+
+        withBrowser(fragmented = true) {
+            cardBrowserFragment.openNoteEditorForCurrentlySelectedRow()
+            advanceRobolectricLooper()
+
+            val editor = requireNotNull(fragment) { "note editor should be loaded in the trailing pane" }
+            editor.setFieldValueFromUi(0, "Hello edited")
+            editor.saveNote()
+            advanceRobolectricLooper()
+
+            assertThat("field edit is persisted", col.getNote(note.id).fields[0], equalTo("Hello edited"))
+        }
+    }
+
+    /**
+     * Regression test for `CardBrowserFragment.openNoteEditorForCurrentlySelectedRow`
+     * (`@NeedsTest("I/O edits are saved")`), see issue 15609.
+     *
+     * The embedded Image Occlusion editor writes its changes straight to the collection.
+     * Saving/closing the note editor afterwards must not clobber those changes with a stale
+     * copy of the note.
+     */
+    @Test
+    fun `image occlusion edits made in the browser are saved - 15609`() {
+        val note =
+            col.newNote(col.notetypes.byName("Image Occlusion")!!).apply {
+                setField(0, "{{c1::image-occlusion:rect:left=0:top=0:width=10:height=10}}")
+                setField(1, "<img src=\"original.png\">")
+                col.addNote(this, col.decks.selected())
+            }
+
+        withBrowser(fragmented = true) {
+            cardBrowserFragment.openNoteEditorForCurrentlySelectedRow()
+            advanceRobolectricLooper()
+            val editor = requireNotNull(fragment) { "note editor should be loaded in the trailing pane" }
+
+            // mimic the embedded Image Occlusion editor persisting a change while the note editor is open
+            @Suppress("CheckResult")
+            col.updateNote(col.getNote(note.id).apply { setField(1, "<img src=\"edited.png\">") })
+            advanceRobolectricLooper()
+
+            editor.saveNote()
+            advanceRobolectricLooper()
+
+            assertThat(
+                "the image occlusion editor's change is not overwritten",
+                col.getNote(note.id).fields[1],
+                equalTo("<img src=\"edited.png\">"),
+            )
+        }
+    }
+
     @Test
     fun `deck chip performs a search`() {
         // The deck chip uses `DeckSelectionListener`, which uses a different code path
